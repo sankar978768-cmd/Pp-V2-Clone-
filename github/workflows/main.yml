@@ -1,0 +1,73 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Install Android SDK 35 & Build APK
+        run: |
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          if [ -f "package.json" ]; then
+            npm install --legacy-peer-deps || true
+            npm run build -- --base=./ || npm run build || true
+          fi
+
+          npm install -g cordova
+          rm -rf /tmp/MyApp
+          cordova create /tmp/MyApp com.sankar.myapp MyApp
+          rm -rf /tmp/MyApp/www/*
+
+          if [ -d "dist" ]; then
+            cp -r dist/* /tmp/MyApp/www/
+          elif [ -d "build" ]; then
+            cp -r build/* /tmp/MyApp/www/
+          else
+            find . -maxdepth 1 ! -name '.' ! -name '.git' ! -name '.github' ! -name 'node_modules' -exec cp -r {} /tmp/MyApp/www/ \;
+          fi
+
+          if [ ! -f "/tmp/MyApp/www/index.html" ]; then
+            FIRST_HTML=$(find /tmp/MyApp/www -maxdepth 2 -name "*.html" | head -n 1)
+            if [ -n "$FIRST_HTML" ]; then
+              cp "$FIRST_HTML" /tmp/MyApp/www/index.html
+            fi
+          fi
+
+          cd /tmp/MyApp
+          cordova platform add android@14.0.1
+          cordova build android
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: /tmp/MyApp/platforms/android/app/build/outputs/apk/debug/app-debug.apk
