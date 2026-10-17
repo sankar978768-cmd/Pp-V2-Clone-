@@ -32,7 +32,7 @@ jobs:
         run: |
           # ==========================================
           # 1. CHANGE YOUR APP NAME BELOW:
-          APP_NAME="PP New Drk"
+          APP_NAME="SK Panchapachi"
           APP_ID="com.sankar.ppnewdrk"
           # ==========================================
 
