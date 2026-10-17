@@ -32,8 +32,8 @@ jobs:
         run: |
           # ==========================================
           # 1. CHANGE YOUR APP NAME BELOW:
-          APP_NAME="SK Panchapachi"
-          APP_ID="com.sankar.ppnewdrk"
+          APP_NAME="SK_Panchapachi"
+          APP_ID="com.sk.panchapachi"
           # ==========================================
 
           export ANDROID_HOME=/usr/local/lib/android/sdk
