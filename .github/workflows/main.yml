@@ -32,7 +32,7 @@ jobs:
         run: |
           # ==========================================
           # 1. CHANGE YOUR APP NAME BELOW:
-          APP_NAME="SK_Panchapachi"
+          APP_NAME="SK Panchapachi"
           APP_ID="com.sk.panchapachi"
           # ==========================================
 
@@ -59,10 +59,10 @@ jobs:
             npx vite build --base=./ || npm run build -- --base=./ || npm run build || true
           fi
 
-          # Create Cordova project with custom App Name
+          # Create Cordova project with reliable ASCII project name, then set Display Name
           npm install -g cordova
           rm -rf /tmp/MyApp
-          cordova create /tmp/MyApp "$APP_ID" "$APP_NAME"
+          cordova create /tmp/MyApp "$APP_ID" "SKPanchapachi"
           rm -rf /tmp/MyApp/www/*
 
           # Copy built website files
@@ -71,7 +71,7 @@ jobs:
           elif [ -d "build" ]; then
             cp -r build/* /tmp/MyApp/www/
           else
-            find . -maxdepth 1 ! -name '.' ! -name '.git' ! -name '.github' ! -name 'node_modules' -exec cp -r {} /tmp/MyApp/www/ \;
+            find . -maxdepth 1 ! -name '.' ! -name '.git' ! -name '.github' ! -name 'github' ! -name 'node_modules' -exec cp -r {} /tmp/MyApp/www/ \;
           fi
 
           # Ensure index.html exists
@@ -91,20 +91,28 @@ jobs:
 
           cd /tmp/MyApp
 
-          # Allow external CDNs (Tailwind, fonts, APIs) in Cordova config.xml
+          # Set exact display APP_NAME and allow external CDNs in config.xml
+          sed -i "s|<name>.*</name>|<name>$APP_NAME</name>|g" config.xml
           sed -i 's|</widget>|  <allow-navigation href="*" />\n  <access origin="*" />\n  <preference name="AndroidInsecureFileModeEnabled" value="true" />\n</widget>|' config.xml
+
+          # Convert and register custom icon cleanly via Cordova config.xml
+          if [ -n "$ICON_SOURCE" ]; then
+            sudo apt-get update -y && sudo apt-get install -y imagemagick || true
+            convert "$ICON_SOURCE" -resize 512x512! /tmp/MyApp/icon_clean.png 2>/dev/null || cp "$ICON_SOURCE" /tmp/MyApp/icon_clean.png
+            sed -i 's|</widget>|  <icon src="icon_clean.png" />\n</widget>|' config.xml
+          fi
 
           cordova platform add android@14.0.1
 
-          # Replace default robot icon if icon.png or logo.png is in the repo
-          if [ -n "$ICON_SOURCE" ]; then
-            ffmpeg -y -i "$ICON_SOURCE" -vf scale=512:512 /tmp/clean_icon.png 2>/dev/null || cp "$ICON_SOURCE" /tmp/clean_icon.png
+          # Also overwrite mipmap PNGs safely (including foreground) if custom icon exists
+          if [ -f "/tmp/MyApp/icon_clean.png" ]; then
             rm -rf platforms/android/app/src/main/res/mipmap-anydpi-v26
             rm -rf platforms/android/app/src/main/res/mipmap-anydpi
             for dir in platforms/android/app/src/main/res/mipmap-*; do
               if [ -d "$dir" ]; then
-                cp /tmp/clean_icon.png "$dir/ic_launcher.png"
-                cp /tmp/clean_icon.png "$dir/ic_launcher_round.png" 2>/dev/null || true
+                cp /tmp/MyApp/icon_clean.png "$dir/ic_launcher.png" || true
+                cp /tmp/MyApp/icon_clean.png "$dir/ic_launcher_round.png" || true
+                cp /tmp/MyApp/icon_clean.png "$dir/ic_launcher_foreground.png" || true
               fi
             done
           fi
