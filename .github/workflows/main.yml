@@ -45,21 +45,35 @@ jobs:
 
           # Find icon file if uploaded to repo
           ICON_SOURCE=""
-          for f in icon.png logo.png icon.jpg logo.jpg; do
+          for f in icon.png logo.png icon.jpg logo.jpg public/icon.png public/logo.png; do
             if [ -f "$f" ]; then
               ICON_SOURCE="$(pwd)/$f"
               break
             fi
           done
 
-          # Build React/Vite project with relative paths so screen isn't blank
+          # Locate project directory (in case package.json or index.html is in a subfolder)
+          PROJECT_DIR="."
+          if [ ! -f "package.json" ] && [ ! -f "index.html" ]; then
+            FOUND_PKG=$(find . -maxdepth 2 -name "package.json" ! -path "*/node_modules/*" | head -n 1)
+            if [ -n "$FOUND_PKG" ]; then
+              PROJECT_DIR=$(dirname "$FOUND_PKG")
+            fi
+          fi
+          cd "$PROJECT_DIR"
+
+          # Build React/Vite project and bypass TypeScript strict errors that block dist/ creation
           if [ -f "package.json" ]; then
-            sed -i 's/base\s*:\s*["'\''][^"'\'']*["'\'']/base: ".\/"/g' vite.config.* 2>/dev/null || true
-            npm install --legacy-peer-deps || npm install --force || true
-            npx vite build --base=./ || npm run build -- --base=./ || npm run build || true
+            npm install --legacy-peer-deps || npm install --force
+            # Force relative base path in vite config if present
+            if ls vite.config.* 1> /dev/null 2>&1; then
+              sed -i 's/base\s*:\s*["'\''][^"'\'']*["'\'']/base: ".\/"/g' vite.config.* || true
+            fi
+            # Run Vite directly first (skips tsc -b build failures that prevent dist/ from generating)
+            npx vite build --base=./ || npm run build -- --base=./ || npm run build
           fi
 
-          # Create Cordova project with reliable ASCII project name, then set Display Name
+          # Create Cordova project
           npm install -g cordova
           rm -rf /tmp/MyApp
           cordova create /tmp/MyApp "$APP_ID" "SKPanchapachi"
@@ -70,6 +84,8 @@ jobs:
             cp -r dist/* /tmp/MyApp/www/
           elif [ -d "build" ]; then
             cp -r build/* /tmp/MyApp/www/
+          elif [ -d "out" ]; then
+            cp -r out/* /tmp/MyApp/www/
           else
             find . -maxdepth 1 ! -name '.' ! -name '.git' ! -name '.github' ! -name 'github' ! -name 'node_modules' -exec cp -r {} /tmp/MyApp/www/ \;
           fi
@@ -82,20 +98,53 @@ jobs:
             fi
           fi
 
-          # Fix root paths (/assets -> ./assets) and React Router white screen
+          # Fix asset paths, remove restrictive CSP, and inject safe router + error catcher
           if [ -f "/tmp/MyApp/www/index.html" ]; then
+            # Convert root-relative asset paths (/assets/...) to relative (./assets/...)
             sed -i 's|src="/|src="./|g; s|href="/|href="./|g' /tmp/MyApp/www/index.html
-            sed -i '/<meta http-equiv="Content-Security-Policy"/d' /tmp/MyApp/www/index.html
-            sed -i 's|<head>|<head><script>if(window.location.pathname.endsWith("/index.html")){window.history.replaceState(null,"","/");}</script>|' /tmp/MyApp/www/index.html
+            # Remove restrictive Content-Security-Policy meta tags
+            sed -i '/Content-Security-Policy/d' /tmp/MyApp/www/index.html
+            # Remove importmap if Vite already bundled the modules into ./assets
+            if [ -d "/tmp/MyApp/www/assets" ]; then
+              sed -i '/<script type="importmap">/,/<\/script>/d' /tmp/MyApp/www/index.html
+            fi
+            # Inject safe path normalizer for React Router and visual error debugger
+            cat << 'EOF' > /tmp/inject.js
+          <script>
+          (function() {
+            try {
+              if (window.location.protocol.indexOf('http') === 0 && window.location.pathname.endsWith('/index.html')) {
+                window.history.replaceState(null, '', window.location.pathname.replace(/\/index\.html$/, '/'));
+              }
+            } catch (e) {}
+            window.addEventListener('error', function(e) {
+              console.error('Global Error:', e.message);
+            });
+          })();
+          </script>
+          EOF
+            sed -i "/<head>/r /tmp/inject.js" /tmp/MyApp/www/index.html
           fi
 
           cd /tmp/MyApp
 
-          # Set exact display APP_NAME and allow external CDNs in config.xml
+          # Configure Cordova Android 14 to serve over https://localhost with full network/CDN access
           sed -i "s|<name>.*</name>|<name>$APP_NAME</name>|g" config.xml
-          sed -i 's|</widget>|  <allow-navigation href="*" />\n  <access origin="*" />\n  <preference name="AndroidInsecureFileModeEnabled" value="true" />\n</widget>|' config.xml
+          cat << 'EOF' > /tmp/cordova_prefs.xml
+            <allow-navigation href="*" />
+            <access origin="*" />
+            <preference name="MixedContentMode" value="0" />
+            <preference name="AndroidXEnabled" value="true" />
+            <preference name="hostname" value="localhost" />
+            <preference name="AndroidInsecureFileModeEnabled" value="false" />
+          </widget>
+          EOF
+          sed -i '/<\/widget>/ {
+            r /tmp/cordova_prefs.xml
+            d
+          }' config.xml
 
-          # Convert and register custom icon cleanly via Cordova config.xml
+          # Convert and register custom icon cleanly
           if [ -n "$ICON_SOURCE" ]; then
             sudo apt-get update -y && sudo apt-get install -y imagemagick || true
             convert "$ICON_SOURCE" -resize 512x512! /tmp/MyApp/icon_clean.png 2>/dev/null || cp "$ICON_SOURCE" /tmp/MyApp/icon_clean.png
@@ -104,7 +153,12 @@ jobs:
 
           cordova platform add android@14.0.1
 
-          # Also overwrite mipmap PNGs safely (including foreground) if custom icon exists
+          # Remove cleartext/network security blocks in AndroidManifest.xml so CDNs & APIs load
+          if [ -f "platforms/android/app/src/main/AndroidManifest.xml" ]; then
+            sed -i 's/<application/<application android:usesCleartextTraffic="true"/g' platforms/android/app/src/main/AndroidManifest.xml
+          fi
+
+          # Also overwrite mipmap PNGs safely
           if [ -f "/tmp/MyApp/icon_clean.png" ]; then
             rm -rf platforms/android/app/src/main/res/mipmap-anydpi-v26
             rm -rf platforms/android/app/src/main/res/mipmap-anydpi
@@ -124,3 +178,4 @@ jobs:
         with:
           name: app-debug-apk
           path: /tmp/MyApp/platforms/android/app/build/outputs/apk/debug/app-debug.apk
+          
