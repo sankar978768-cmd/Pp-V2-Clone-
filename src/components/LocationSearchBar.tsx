@@ -26,6 +26,9 @@ interface LocationSearchBarProps {
   ) => void;
   onResetStandard?: () => void;
   isCustomActive?: boolean;
+  searchLabel?: React.ReactNode;
+  recentLabel?: React.ReactNode;
+  headerExtra?: React.ReactNode;
 }
 
 export const LocationSearchBar: React.FC<LocationSearchBarProps> = ({
@@ -33,6 +36,9 @@ export const LocationSearchBar: React.FC<LocationSearchBarProps> = ({
   onApplyLocationSchedule,
   onResetStandard,
   isCustomActive,
+  searchLabel,
+  recentLabel,
+  headerExtra,
 }) => {
   const { language, t } = useLanguage();
 
@@ -165,13 +171,22 @@ export const LocationSearchBar: React.FC<LocationSearchBarProps> = ({
     <div ref={containerRef} className="space-y-3" id="location-search-section">
       {/* Search Header & Input */}
       <div>
-        <label
-          htmlFor="location-search-input"
-          className="block text-xs font-bold text-amber-700 dark:text-amber-300 mb-1.5 flex items-center gap-1.5"
-        >
-          <Search className="w-3.5 h-3.5 text-amber-500" />
-          <span>{t('locationSearchLabel')}</span>
-        </label>
+        <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+          <label
+            htmlFor="location-search-input"
+            className="block text-xs font-bold text-amber-700 dark:text-amber-300 flex items-center gap-1.5"
+          >
+            {searchLabel ? (
+              searchLabel
+            ) : (
+              <>
+                <Search className="w-3.5 h-3.5 text-amber-500" />
+                <span>{t('locationSearchLabel')}</span>
+              </>
+            )}
+          </label>
+          {headerExtra}
+        </div>
 
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -281,8 +296,14 @@ export const LocationSearchBar: React.FC<LocationSearchBarProps> = ({
       <div className="space-y-1.5" id="recent-location-searches-container">
         <div className="flex items-center justify-between text-xs">
           <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-amber-500" />
-            <span>{t('recentSearchesTitle')}</span>
+            {recentLabel ? (
+              recentLabel
+            ) : (
+              <>
+                <Clock className="w-3.5 h-3.5 text-amber-500" />
+                <span>{t('recentSearchesTitle')}</span>
+              </>
+            )}
           </span>
 
           <div className="flex items-center gap-2">

@@ -810,6 +810,7 @@ export default function App() {
         onScrollToSection={scrollToSection}
         selectedBird={selectedBird}
         onOpenBirdSelectModal={() => setIsBirdSelectModalOpen(true)}
+        locationName={locationName}
       />
     </div>
   );

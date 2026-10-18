@@ -9,6 +9,7 @@ export interface FixedBottomNavProps {
   onScrollToSection: (sectionId: string) => void;
   selectedBird: BirdId;
   onOpenBirdSelectModal: () => void;
+  locationName?: string;
 }
 
 export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
@@ -16,12 +17,17 @@ export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
   onScrollToSection,
   selectedBird,
   onOpenBirdSelectModal,
+  locationName,
 }) => {
   const { language, getBirdName } = useLanguage();
 
+  const locationLabel = locationName?.trim()
+    ? locationName.trim()
+    : (language === 'ta' ? 'இடம்' : 'Location');
+
   // Equal 4-Column Layout in exact order requested:
   // 1. Date & Day (📅 Calendar)
-  // 2. Location (📍 MapPin)
+  // 2. Location (📍 MapPin) - dynamic label reflecting selected location name
   // 3. Bird (Selected Bird Icon / Emoji)
   // 4. Activity (⚡ Zap)
   const navItems = [
@@ -33,7 +39,7 @@ export const FixedBottomNav: React.FC<FixedBottomNavProps> = ({
     },
     {
       id: 'section-location',
-      label: language === 'ta' ? 'இடம்' : 'Location',
+      label: locationLabel,
       Icon: MapPin,
       isBird: false,
     },
