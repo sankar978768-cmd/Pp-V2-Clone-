@@ -43,16 +43,23 @@ jobs:
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-          # Find icon file if uploaded to repo
+          # Find icon.png anywhere in the repo (case-insensitive)
           ICON_SOURCE=""
-          for f in icon.png logo.png icon.jpg logo.jpg public/icon.png public/logo.png; do
+          for f in icon.png Icon.png ICON.PNG logo.png public/icon.png src/assets/icon.png; do
             if [ -f "$f" ]; then
-              ICON_SOURCE="$(pwd)/$f"
+              ICON_SOURCE="$(realpath "$f")"
               break
             fi
           done
+          if [ -z "$ICON_SOURCE" ]; then
+            FOUND_IMG=$(find . -maxdepth 3 \( -iname "icon.png" -o -iname "logo.png" -o -iname "*icon*.png" \) ! -path "*/node_modules/*" | head -n 1)
+            if [ -n "$FOUND_IMG" ]; then
+              ICON_SOURCE="$(realpath "$FOUND_IMG")"
+            fi
+          fi
+          echo "Using Icon Source: $ICON_SOURCE"
 
-          # Locate project directory (in case package.json or index.html is in a subfolder)
+          # Locate project directory
           PROJECT_DIR="."
           if [ ! -f "package.json" ] && [ ! -f "index.html" ]; then
             FOUND_PKG=$(find . -maxdepth 2 -name "package.json" ! -path "*/node_modules/*" | head -n 1)
@@ -62,14 +69,12 @@ jobs:
           fi
           cd "$PROJECT_DIR"
 
-          # Build React/Vite project and bypass TypeScript strict errors that block dist/ creation
+          # Build React/Vite project
           if [ -f "package.json" ]; then
             npm install --legacy-peer-deps || npm install --force
-            # Force relative base path in vite config if present
             if ls vite.config.* 1> /dev/null 2>&1; then
               sed -i 's/base\s*:\s*["'\''][^"'\'']*["'\'']/base: ".\/"/g' vite.config.* || true
             fi
-            # Run Vite directly first (skips tsc -b build failures that prevent dist/ from generating)
             npx vite build --base=./ || npm run build -- --base=./ || npm run build
           fi
 
@@ -98,17 +103,13 @@ jobs:
             fi
           fi
 
-          # Fix asset paths, remove restrictive CSP, and inject safe router + error catcher
+          # Fix asset paths and React Router
           if [ -f "/tmp/MyApp/www/index.html" ]; then
-            # Convert root-relative asset paths (/assets/...) to relative (./assets/...)
             sed -i 's|src="/|src="./|g; s|href="/|href="./|g' /tmp/MyApp/www/index.html
-            # Remove restrictive Content-Security-Policy meta tags
             sed -i '/Content-Security-Policy/d' /tmp/MyApp/www/index.html
-            # Remove importmap if Vite already bundled the modules into ./assets
             if [ -d "/tmp/MyApp/www/assets" ]; then
               sed -i '/<script type="importmap">/,/<\/script>/d' /tmp/MyApp/www/index.html
             fi
-            # Inject safe path normalizer for React Router and visual error debugger
             cat << 'EOF' > /tmp/inject.js
           <script>
           (function() {
@@ -117,9 +118,6 @@ jobs:
                 window.history.replaceState(null, '', window.location.pathname.replace(/\/index\.html$/, '/'));
               }
             } catch (e) {}
-            window.addEventListener('error', function(e) {
-              console.error('Global Error:', e.message);
-            });
           })();
           </script>
           EOF
@@ -128,7 +126,17 @@ jobs:
 
           cd /tmp/MyApp
 
-          # Configure Cordova Android 14 to serve over https://localhost with full network/CDN access
+          # Convert icon.png into both launcher icon and padded splash screen logo
+          sudo apt-get update -y && sudo apt-get install -y imagemagick || true
+          if [ -n "$ICON_SOURCE" ] && [ -f "$ICON_SOURCE" ]; then
+            convert "$ICON_SOURCE" -resize 512x512! /tmp/MyApp/icon_clean.png 2>/dev/null || cp "$ICON_SOURCE" /tmp/MyApp/icon_clean.png
+            # Pad icon inside 512x512 canvas so Android 12+ splash screen circle doesn't clip your logo
+            convert "$ICON_SOURCE" -resize 300x300 -gravity center -background none -extent 512x512 /tmp/MyApp/splash_clean.png 2>/dev/null || cp /tmp/MyApp/icon_clean.png /tmp/MyApp/splash_clean.png
+          else
+            convert -size 512x512 xc:none /tmp/MyApp/splash_clean.png
+          fi
+
+          # Configure Cordova config.xml to use your icon.png for both App Icon and Splash Screen
           sed -i "s|<name>.*</name>|<name>$APP_NAME</name>|g" config.xml
           cat << 'EOF' > /tmp/cordova_prefs.xml
             <allow-navigation href="*" />
@@ -137,6 +145,8 @@ jobs:
             <preference name="AndroidXEnabled" value="true" />
             <preference name="hostname" value="localhost" />
             <preference name="AndroidInsecureFileModeEnabled" value="false" />
+            <preference name="AndroidWindowSplashScreenAnimatedIcon" value="splash_clean.png" />
+            <preference name="AndroidWindowSplashScreenBackground" value="#FFFFFF" />
           </widget>
           EOF
           sed -i '/<\/widget>/ {
@@ -144,21 +154,22 @@ jobs:
             d
           }' config.xml
 
-          # Convert and register custom icon cleanly
-          if [ -n "$ICON_SOURCE" ]; then
-            sudo apt-get update -y && sudo apt-get install -y imagemagick || true
-            convert "$ICON_SOURCE" -resize 512x512! /tmp/MyApp/icon_clean.png 2>/dev/null || cp "$ICON_SOURCE" /tmp/MyApp/icon_clean.png
+          if [ -f "/tmp/MyApp/icon_clean.png" ]; then
             sed -i 's|</widget>|  <icon src="icon_clean.png" />\n</widget>|' config.xml
           fi
 
           cordova platform add android@14.0.1
 
-          # Remove cleartext/network security blocks in AndroidManifest.xml so CDNs & APIs load
+          # Allow cleartext/external network calls
           if [ -f "platforms/android/app/src/main/AndroidManifest.xml" ]; then
             sed -i 's/<application/<application android:usesCleartextTraffic="true"/g' platforms/android/app/src/main/AndroidManifest.xml
           fi
 
-          # Also overwrite mipmap PNGs safely
+          # Force remove Cordova robot splash screen XML and replace with your splash_clean.png
+          find platforms/android/app/src/main/res -name "ic_cdv_splashscreen*" -delete || true
+          cp /tmp/MyApp/splash_clean.png platforms/android/app/src/main/res/drawable/ic_cdv_splashscreen.png
+
+          # Overwrite all mipmap launcher icons with your icon_clean.png
           if [ -f "/tmp/MyApp/icon_clean.png" ]; then
             rm -rf platforms/android/app/src/main/res/mipmap-anydpi-v26
             rm -rf platforms/android/app/src/main/res/mipmap-anydpi
@@ -178,4 +189,3 @@ jobs:
         with:
           name: app-debug-apk
           path: /tmp/MyApp/platforms/android/app/build/outputs/apk/debug/app-debug.apk
-          
